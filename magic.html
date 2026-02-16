@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Calculator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+            user-select: none;
+            touch-action: manipulation;
+        }
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        body {
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: flex-end;
+            font-family: -apple-system, 'Helvetica Neue', Arial, sans-serif;
+        }
+        .calculator {
+            width: 100%;
+            max-width: 420px;
+            padding: 0 14px 24px;
+        }
+
+        /* 表达式行 */
+        .expr {
+            text-align: right;
+            color: #666;
+            font-size: 20px;
+            font-weight: 300;
+            padding: 0 10px;
+            min-height: 26px;
+            line-height: 26px;
+            overflow: hidden;
+            white-space: nowrap;
+            text-overflow: ellipsis;
+        }
+
+        /* 显示屏 */
+        .display {
+            text-align: right;
+            color: #fff;
+            font-size: 72px;
+            font-weight: 200;
+            padding: 10px 8px 20px;
+            min-height: 96px;
+            display: flex;
+            align-items: flex-end;
+            justify-content: flex-end;
+            line-height: 1;
+            overflow: hidden;
+            word-break: break-all;
+        }
+
+        /* 按钮网格 */
+        .buttons {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 14px;
+        }
+        .btn {
+            aspect-ratio: 1;
+            border-radius: 50%;
+            border: none;
+            font-size: 34px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn:active {
+            filter: brightness(1.5);
+        }
+
+        /* 数字键 */
+        .btn-num {
+            background: #333;
+            color: #fff;
+        }
+        /* 功能键 AC +/- % */
+        .btn-func {
+            background: #a5a5a5;
+            color: #000;
+            font-size: 26px;
+        }
+        /* 运算符键 */
+        .btn-op {
+            background: #ff9f0a;
+            color: #fff;
+            font-size: 40px;
+        }
+        .btn-op.active {
+            background: #fff;
+            color: #ff9f0a;
+        }
+        /* 0键横跨两列 */
+        .btn-zero {
+            grid-column: span 2;
+            aspect-ratio: unset;
+            border-radius: 999px;
+            justify-content: flex-start;
+            padding-left: 30px;
+        }
+    </style>
+</head>
+<body>
+    <div class="calculator">
+        <div class="expr" id="expr"></div>
+        <div class="display" id="display">0</div>
+        <div class="buttons" id="buttons">
+            <button class="btn btn-func" data-action="clear">AC</button>
+            <button class="btn btn-func" data-action="negate">+/&#x2212;</button>
+            <button class="btn btn-func" data-action="percent">%</button>
+            <button class="btn btn-op" data-action="divide">&#xF7;</button>
+
+            <button class="btn btn-num" data-digit="7">7</button>
+            <button class="btn btn-num" data-digit="8">8</button>
+            <button class="btn btn-num" data-digit="9">9</button>
+            <button class="btn btn-op" data-action="multiply">&#xD7;</button>
+
+            <button class="btn btn-num" data-digit="4">4</button>
+            <button class="btn btn-num" data-digit="5">5</button>
+            <button class="btn btn-num" data-digit="6">6</button>
+            <button class="btn btn-op" data-action="subtract">&#x2212;</button>
+
+            <button class="btn btn-num" data-digit="1">1</button>
+            <button class="btn btn-num" data-digit="2">2</button>
+            <button class="btn btn-num" data-digit="3">3</button>
+            <button class="btn btn-op" data-action="add">+</button>
+
+            <button class="btn btn-num btn-zero" data-digit="0">0</button>
+            <button class="btn btn-num" data-action="decimal">.</button>
+            <button class="btn btn-op" data-action="equals">=</button>
+        </div>
+    </div>
+
+    <script>
+    (function () {
+        var MAGIC = 20262228;
+        var display = document.getElementById('display');
+        var exprEl  = document.getElementById('expr');
+
+        var input   = '0';   // 当前输入串
+        var total   = 0;     // 按+后的累计和
+        var addCnt  = 0;     // 清零后按+的次数
+        var fresh   = true;  // 下一次按数字是否开始新数
+        var fakeStr = '';    // 第三个数的伪造串
+        var opBtn   = null;  // 当前高亮的运算符按钮
+        var exprDone = '';   // 已确认的表达式 (按+之后的部分)
+
+        /* ---- 显示相关 ---- */
+        function addCommas(s) {
+            var neg = (s[0] === '-');
+            if (neg) s = s.slice(1);
+            var out = '';
+            for (var i = s.length - 1, c = 0; i >= 0; i--, c++) {
+                if (c > 0 && c % 3 === 0) out = ',' + out;
+                out = s[i] + out;
+            }
+            return neg ? '-' + out : out;
+        }
+
+        function fmtNum(s) {
+            var parts = s.split('.');
+            var formatted = addCommas(parts[0]);
+            if (parts.length > 1) formatted += '.' + parts[1];
+            return formatted;
+        }
+
+        function render(str) {
+            var formatted = fmtNum(str);
+            var digits = str.replace(/[^0-9]/g, '').length;
+            var size = 72;
+            if (digits > 6) size = Math.max(36, 72 - (digits - 6) * 6);
+            display.style.fontSize = size + 'px';
+            display.textContent = formatted;
+        }
+
+        function showExpr(currentPart) {
+            exprEl.textContent = exprDone + (currentPart || '');
+        }
+
+        function highlightOp(btn) {
+            if (opBtn) opBtn.classList.remove('active');
+            opBtn = btn || null;
+            if (opBtn) opBtn.classList.add('active');
+        }
+
+        /* ---- 按键处理 ---- */
+        function onDigit(d) {
+            highlightOp(null);
+
+            if (addCnt >= 2) {
+                // 魔术模式: 一按就直接显示完整的伪造加数
+                if (fresh) {
+                    fakeStr = String(MAGIC - total);
+                    fresh = false;
+                }
+                input = fakeStr;
+            } else {
+                // 正常模式
+                if (fresh) {
+                    input = d;
+                    fresh = false;
+                } else {
+                    input = (input === '0') ? d : input + d;
+                }
+            }
+            render(input);
+            showExpr(fmtNum(input));
+        }
+
+        function onDecimal() {
+            highlightOp(null);
+            if (addCnt >= 2) return;
+            if (fresh) { input = '0.'; fresh = false; }
+            else if (input.indexOf('.') === -1) input += '.';
+            render(input);
+            showExpr(fmtNum(input));
+        }
+
+        function onAdd(btn) {
+            var val;
+            if (addCnt >= 2) {
+                val = MAGIC - total;
+            } else {
+                val = parseFloat(input) || 0;
+            }
+            total += val;
+            addCnt++;
+            fresh = true;
+            exprDone += fmtNum(input) + ' + ';
+            showExpr('');
+            highlightOp(btn);
+        }
+
+        function onEquals() {
+            highlightOp(null);
+            var result;
+            if (addCnt >= 2) {
+                result = MAGIC;
+            } else if (addCnt > 0) {
+                result = total + (parseFloat(input) || 0);
+            } else {
+                result = parseFloat(input) || 0;
+            }
+            var s = String(result);
+            if (s.indexOf('.') !== -1 && result === Math.floor(result)) {
+                s = String(Math.floor(result));
+            }
+            // 表达式行显示完整算式
+            showExpr(fmtNum(input) + ' =');
+            render(s);
+            input = s;
+            total = 0;
+            addCnt = 0;
+            fresh = true;
+            exprDone = '';
+        }
+
+        function onClear() {
+            input = '0'; total = 0; addCnt = 0;
+            fresh = true; fakeStr = '';
+            exprDone = '';
+            highlightOp(null);
+            render('0');
+            showExpr('');
+        }
+
+        function onNegate() {
+            if (input === '0' || addCnt >= 2) return;
+            input = (input[0] === '-') ? input.slice(1) : '-' + input;
+            render(input);
+        }
+
+        function onPercent() {
+            if (addCnt >= 2) return;
+            var v = (parseFloat(input) || 0) / 100;
+            input = String(v);
+            render(input);
+        }
+
+        /* ---- 事件委托 ---- */
+        document.getElementById('buttons').addEventListener('click', function (e) {
+            var btn = e.target;
+            while (btn && !btn.classList.contains('btn')) btn = btn.parentElement;
+            if (!btn) return;
+
+            if (btn.dataset.digit !== undefined) { onDigit(btn.dataset.digit); return; }
+
+            switch (btn.dataset.action) {
+                case 'clear':    onClear();    break;
+                case 'negate':   onNegate();   break;
+                case 'percent':  onPercent();  break;
+                case 'decimal':  onDecimal();  break;
+                case 'add':      onAdd(btn);   break;
+                case 'equals':   onEquals();   break;
+                case 'divide':
+                case 'multiply':
+                case 'subtract': highlightOp(btn); break;
+            }
+        });
+
+        render('0');
+    })();
+    </script>
+</body>
+</html>
